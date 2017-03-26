@@ -1,0 +1,26 @@
+# TODO(nwojke): This file is outdated, create new version compatible
+# with pybind11.
+from setuptools import setup
+from distutils.sysconfig import get_python_lib
+import glob
+import os
+import sys
+
+if os.path.exists('pymcf.cpp'):
+    print("The setup.py script should be executed from the build directory.")
+    sys.exit(1)
+
+setup(
+    name="mcf",
+    version="0.1.0",
+    author="Nicolai Wojke",
+    author_email="nwojke@uni-koblenz.de",
+    description="A small library to solve min-cost flow networks using COIN-OR",
+    url="https://gitlab.uni-koblenz.de",
+    license="BSD",
+    data_files=[
+        (get_python_lib(), glob.glob("${PYTHON_OUTPUT_DIRECTORY}/*.so"))
+        ],
+    package_dir={"": "${PYTHON_OUTPUT_DIRECTORY}"},
+    zip_safe=False
+)
