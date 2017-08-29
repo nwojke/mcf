@@ -8,7 +8,6 @@
 #include <stdexcept>
 
 #include <mcf/batch_processing.hpp>
-#include <mcf/batch_processing.hpp>
 #include <mcf/graph.hpp>
 #include <mcf/k_shortest_path_solver.hpp>
 #include <mcf/logging.hpp>

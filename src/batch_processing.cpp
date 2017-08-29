@@ -596,7 +596,13 @@ void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
                     trajectory_labels_, full_trajectories, full_labels,
                     clipping_indices, label_to_uncached_trajectory_head_);
 
-  trajectories.resize(full_trajectories.size());
+  // TODO(nwojke): Return the total number of trajectories from
+  // MergeTrajectories.
+  const int num_trajectories =
+      full_labels.empty()
+          ? 0
+          : 1 + *std::max_element(full_labels.begin(), full_labels.end());
+  trajectories.resize(num_trajectories);
   for (std::size_t i = 0; i < full_trajectories.size(); ++i) {
     assert(trajectories[full_labels[i]].empty());
     trajectories[full_labels[i]] = full_trajectories[i];
