@@ -69,6 +69,11 @@ The batch solver is defined in `batch_processing.hpp`.
 All of the classes have accompanying documentation that should help you get
 started. For a minimalistic example check out the `examples` directory.
 
+## Example application
+
+A complete implementation of a tracking method using this library can be found
+in a seperate [project](https://github.com/nwojke/mcf-tracker).
+
 ## Literature
 
 1. Zhang, Li, Nevatia: Global data association for multi-object tracking
