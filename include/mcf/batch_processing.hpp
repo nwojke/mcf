@@ -109,7 +109,8 @@ class BatchProcessing {
 
   Graph graph_;
 
-  std::map<int, int> label_to_uncached_trajectory_head_;
+  std::map<int, int> label_to_noncached_trajectory_head_;
+  int next_label_;
 };
 
 }  // namespace mcf

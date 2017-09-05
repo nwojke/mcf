@@ -176,12 +176,13 @@ bool ExtendTrajectory(const std::vector<int>& cached_trajectory,
  *        until the most recent time step in their full length.
  * @param full_labels Unique trajectory labels associated with
  *        full_trajectories.
- * @param label_to_uncached_trajectory_head Maps from trajectory index to
- *        trajectory head; used to keep uncached trajectories, i.e.,
- *        trajectories that are fully contained in the optimization window,
- *        consistently labeled throughout subsequent solver runs.
  * @param clipping_indices Contains the index of the new trajectory head in
  *        new_trajectories or -1 if the trajectory is not part of the cache.
+ * @param label_to_noncached_trajectory_head Maps from trajectory index to
+ *        trajectory head; used to keep non-cached trajectories, i.e.,
+ *        trajectories that are fully contained in the optimization window,
+ *        consistently labeled throughout subsequent solver runs.
+ * @param next_label A counter used to create unique trajectory labels.
  */
 void MergeTrajectories(const std::vector<int> location_to_timestep,
                        const int clipping_timestep,
@@ -191,7 +192,8 @@ void MergeTrajectories(const std::vector<int> location_to_timestep,
                        std::vector<std::vector<int>>& full_trajectories,
                        std::vector<int>& full_labels,
                        std::vector<int>& clipping_indices,
-                       std::map<int, int>& label_to_uncached_trajectory_head) {
+                       std::map<int, int>& label_to_noncached_trajectory_head,
+                       int& next_label) {
   assert(cached_trajectories.size() == cached_labels.size());
   // TODO(nwojke): Refactor to shorter functions.
 
@@ -292,8 +294,7 @@ void MergeTrajectories(const std::vector<int> location_to_timestep,
 
         if (clipping_index == trajectory.size()) {
           // The trajectory does not extent into the next optimization window,
-          // do
-          // not add it to cache.
+          // do not add it to cache.
           return false;
         }
 
@@ -306,27 +307,26 @@ void MergeTrajectories(const std::vector<int> location_to_timestep,
         cached_trajectories.back().insert(cached_trajectories.back().end(),
                                           trajectory.begin(),
                                           trajectory.begin() + end_index);
-        cached_labels.emplace_back(label);
+        cached_labels.push_back(label);
         return true;
       };
 
-  // Now try adding previously seen, but uncached trajectories with consistent
-  // label.
-  // TODO(nwojke): Clean this up, the array below should not be necessary.
+  // Now try adding previously seen, but non-cached trajectories with
+  // consistent label.
   std::vector<bool> trajectory_is_new(clipping_indices.size());
   for (std::size_t index = 0; index < clipping_indices.size(); ++index) {
     trajectory_is_new[index] = clipping_indices[index] < 0;
   }
 
-  for (auto index_and_head = label_to_uncached_trajectory_head.begin();
-       index_and_head != label_to_uncached_trajectory_head.end();) {
+  for (auto index_and_head = label_to_noncached_trajectory_head.begin();
+       index_and_head != label_to_noncached_trajectory_head.end();) {
     // Search for a matching trajectory that is not yet processed.
-    std::size_t trajectory_index = 0;
-    for (; trajectory_index < new_trajectories.size(); ++trajectory_index) {
-      assert(!new_trajectories[trajectory_index].empty());
-      if (index_and_head->second ==
-              new_trajectories[trajectory_index].front() &&
-          clipping_indices[trajectory_index] < 0) {
+    std::size_t trajectory_index = std::numeric_limits<std::size_t>::max();
+    for (std::size_t index = 0; index < new_trajectories.size(); ++index) {
+      assert(!new_trajectories[index].empty());
+      if (index_and_head->second == new_trajectories[index].front() &&
+          clipping_indices[index] < 0) {
+        trajectory_index = index;
         break;
       }
     }
@@ -340,7 +340,10 @@ void MergeTrajectories(const std::vector<int> location_to_timestep,
 
     if (trajectory_is_cached ||
         location_to_timestep[index_and_head->second] < clipping_timestep) {
-      index_and_head = label_to_uncached_trajectory_head.erase(index_and_head);
+      // A previously seen trajectory has been added to the cache or moved out
+      // of the optimization window. Remove it from the list of non-cached
+      // trajectories.
+      index_and_head = label_to_noncached_trajectory_head.erase(index_and_head);
     } else {
       ++index_and_head;
     }
@@ -353,11 +356,11 @@ void MergeTrajectories(const std::vector<int> location_to_timestep,
       continue;
     }
 
-    const int label = full_trajectories.size();
+    const int label = next_label++;
     if (!AddTrajectory(trajectory_index, label)) {
-      const int index = full_trajectories.size() - 1;
       const int location = new_trajectories[trajectory_index].front();
-      label_to_uncached_trajectory_head.insert(std::make_pair(index, location));
+      label_to_noncached_trajectory_head.insert(
+          std::make_pair(label, location));
     }
   }
 }
@@ -497,7 +500,8 @@ BatchProcessing::BatchProcessing(const int window_len,
       previous_clipping_timestep_(0),
       num_pruned_locations_(0),
       location_to_timestep_(1, -1),
-      timestep_to_locations_(1) {}
+      timestep_to_locations_(1),
+      next_label_(0) {}
 
 void BatchProcessing::Reserve(int num_edges) { graph_.Reserve(num_edges); }
 
@@ -591,18 +595,12 @@ void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
   std::vector<int> clipping_indices;
   std::vector<std::vector<int>> full_trajectories;
   std::vector<int> full_labels;
-  MergeTrajectories(location_to_timestep_, clipping_timestep,
-                    new_trajectories_in_sequence, trajectories_,
-                    trajectory_labels_, full_trajectories, full_labels,
-                    clipping_indices, label_to_uncached_trajectory_head_);
+  MergeTrajectories(
+      location_to_timestep_, clipping_timestep, new_trajectories_in_sequence,
+      trajectories_, trajectory_labels_, full_trajectories, full_labels,
+      clipping_indices, label_to_noncached_trajectory_head_, next_label_);
 
-  // TODO(nwojke): Return the total number of trajectories from
-  // MergeTrajectories.
-  const int num_trajectories =
-      full_labels.empty()
-          ? 0
-          : 1 + *std::max_element(full_labels.begin(), full_labels.end());
-  trajectories.resize(num_trajectories);
+  trajectories.resize(next_label_);
   for (std::size_t i = 0; i < full_trajectories.size(); ++i) {
     assert(trajectories[full_labels[i]].empty());
     trajectories[full_labels[i]] = full_trajectories[i];
