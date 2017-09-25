@@ -70,6 +70,6 @@ class ShortestPathSolver : public Solver {
   std::vector<std::vector<int>> node_index_to_outgoing_edges_;
 };
 
-}  // namespace mf
+}  // namespace mcf
 
 #endif
