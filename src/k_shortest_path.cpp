@@ -503,6 +503,7 @@ int RunSuccessiveShortestPathSearchDijkstraLazyDeletion(
       stop_on_best);
 }
 
+#ifdef MCF_USE_Boost
 int RunSuccessiveShortestPathSearchDijkstraFibonacciHeap(
     Graph& residual_graph,
     std::vector<std::vector<int>>& node_index_to_incoming_edges,
@@ -513,6 +514,7 @@ int RunSuccessiveShortestPathSearchDijkstraFibonacciHeap(
       node_index_to_incoming_edges, node_index_to_outgoing_edges, max_flow,
       stop_on_best);
 }
+#endif
 
 }  // namespace internal
 
