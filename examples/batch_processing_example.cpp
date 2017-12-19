@@ -12,12 +12,13 @@ int main(int argc, char** argv) {
   // time steps.
   static constexpr int kWindowLen = 3;
   mcf::BatchProcessing batch_processing(kWindowLen);
-  std::vector<int> heads = {mcf::BatchProcessing::ST, mcf::BatchProcessing::ST};
+  std::vector<mcf::BatchProcessing::Index> heads = {mcf::BatchProcessing::ST,
+                                                    mcf::BatchProcessing::ST};
 
   static constexpr int kTrajectoryLength = 10;
   for (int timestep = 0; timestep < kTrajectoryLength; ++timestep) {
-    std::vector<int> new_heads = {batch_processing.Add(-1.0),
-                                  batch_processing.Add(-1.0)};
+    std::vector<mcf::BatchProcessing::Index> new_heads = {
+        batch_processing.Add(-1.0), batch_processing.Add(-1.0)};
 
     for (int i = 0; i < 2; ++i) {
       batch_processing.Link(heads[i], new_heads[i], 0.0);

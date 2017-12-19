@@ -11,6 +11,8 @@ const int Graph::InternalSinkNode = 0;
 
 const int Graph::FirstNonSourceSinkNode = 2;
 
+const int Graph::ST = 0;
+
 Graph::Graph() : next_id_(2) {}
 
 void Graph::Reserve(int num_edges) { edges_.reserve(num_edges); }

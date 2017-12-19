@@ -6,6 +6,7 @@
 #include <mcf/k_shortest_path_solver.hpp>
 
 #include <map>
+#include <unordered_map>
 
 namespace mcf {
 
@@ -23,16 +24,24 @@ namespace mcf {
  * Exemplary use-cases
  * -------------------
  *
+ * * To divide the sequence into fixed batches of 100 frames each, set the
+ *   constructor's window_len parameter to 100 and call RunSearch() every
+ *   100 frames.
  * * To estimate trajectories in an on-line fashion, call RunSearch() at each
  *   time step (after calling FinalizeTimeStep()). Set the constructor's
  *   window_len parameter to the history of time steps that should be optimized
  *   (similar to N-back-scan pruning in multiple hypothesis tracking).
- * * To divide the sequence into fixed batches of 100 frames each, set the
- *   constructor's window_len parameter to 100 and call RunSearch() every
- *   100 frames.
+ * * As alternative, call ComputeTrajectories() and RemoveInactiveTracks() at
+ *   each time step (after a call to FinalizeTimeStep()) to only keep track of
+ *   objects that are within the optimization window_len. This prevents the
+ *   number of frajectories in the cache from growing unbounded.
  */
 class BatchProcessing {
  public:
+  using Index = uint64_t;
+  using Trajectory = std::vector<Index>;
+  using TrajectoryMap = std::map<Index, Trajectory>;
+
   /**
    * Constructor.
    *
@@ -47,13 +56,13 @@ class BatchProcessing {
                       ShortestPathSolverType::kDijkstraLazyDeletion);
 
   //! Convenience typedef. See Graph::ST for more information.
-  static const int ST = Graph::ST;
+  static const Index ST;
 
   //! Reserve memory for a given number of edges.
   void Reserve(int num_edges);
 
   //! Add a location with given cost. See Graph::Add() for more information.
-  int Add(double cost);
+  Index Add(double cost);
 
   /**
    * Link two locations with given cost. See Graph::Link() for more
@@ -67,7 +76,7 @@ class BatchProcessing {
    *         optimization window, i.e., have been added before the last call to
    *         RunSearch()).
    */
-  void Link(int src, int dst, double cost);
+  void Link(Index src, Index dst, double cost);
 
   /**
    * Notify the batch processor that the current time step has been finalized.
@@ -82,7 +91,9 @@ class BatchProcessing {
    * Find multi-object trajectory.
    *
    * @param trajectories Computed trajectories, where each trajectory is a
-   *        sequence of location handles returned by Add().
+   *        sequence of location handles returned by Add(). Trajaectories are
+   *        returned in a globally consistent order, such that each trajectory
+   *        keeps its index over subsequent calls.
    * @param ignore_last_exit_cost If true, the exit cost for locations in the
    *        last time step is set to 0 prior to calling the solver. This only
    *        affects the current trajectory search, future calls to RunSearch()
@@ -91,26 +102,47 @@ class BatchProcessing {
   void RunSearch(std::vector<std::vector<int>>& trajectories,
                  bool ignore_last_exit_cost = true);
 
- private:
-  int to_graph_index(int sequence_index) const;
+  /**
+   * Find multi-object trajectory.
+   *
+   * @param ignore_last_exit_cost If true, the exit cost for locations in the
+   *        last time step is set to 0 prior to calling the solver. This only
+   *        affects the current trajectory search, future calls to RunSearch()
+   *        work on the original graph structure.
+   * @return Maps from trajectory index/identifier to lis of location handles
+   *         returned by Add().
+   */
+  TrajectoryMap ComputeTrajectories(bool ignore_last_exit_cost = true);
 
-  int to_sequence_index(int graph_index) const;
+  /**
+   * Remove trajectories from the cache that are not contained in the
+   * optimization window. This affects the list of trajectories returned
+   * by ComputeTrajectories() as well as RunSearch().
+   */
+  void RemoveInactiveTracks();
+
+ private:
+  void Update(bool ignore_last_exit_cost);
+
+  int to_graph_index(Index sequence_index) const;
+
+  Index to_sequence_index(int graph_index) const;
 
   ShortestPathSolverType solver_type_;
-  int window_len_;
-  int current_timestep_;
-  int previous_clipping_timestep_;
-  int num_pruned_locations_;
+  Index window_len_;
 
-  std::vector<int> location_to_timestep_;
-  std::vector<std::vector<int>> timestep_to_locations_;
-  std::vector<std::vector<int>> trajectories_;
-  std::vector<int> trajectory_labels_;
+  Index current_timestep_;
+  Index previous_clipping_timestep_;
+  Index num_pruned_locations_;
+
+  std::unordered_map<Index, Index> location_to_timestep_;
+  std::unordered_map<Index, std::vector<Index>> timestep_to_locations_;
 
   Graph graph_;
 
-  std::map<int, int> label_to_noncached_trajectory_head_;
-  int next_label_;
+  TrajectoryMap trajectories_;
+  std::unordered_map<Index, bool> active_;
+  Index next_trajectory_index_;
 };
 
 }  // namespace mcf

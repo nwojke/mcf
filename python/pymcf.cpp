@@ -180,11 +180,18 @@ class PyBatchProcessing {
 
   void FinalizeTimeStep() { processor_.FinalizeTimeStep(); }
 
-  std::vector<std::vector<int>> RunSearch(const bool ignore_last_exit_cost) {
+  std::vector<std::vector<int>> RunSearch(bool ignore_last_exit_cost) {
     std::vector<std::vector<int>> trajectories;
     processor_.RunSearch(trajectories, ignore_last_exit_cost);
     return trajectories;
   }
+
+  mcf::BatchProcessing::TrajectoryMap ComputeTrajectories(
+      bool ignore_last_exit_cost) {
+    return processor_.ComputeTrajectories(ignore_last_exit_cost);
+  }
+
+  void RemoveInactiveTracks() { processor_.RemoveInactiveTracks(); }
 
   //! Get location specific attributes.
   py::dict operator[](const int location_handle) {
@@ -243,6 +250,9 @@ PYBIND11_PLUGIN(mcf) {
       .def("finalize_timestep", &PyBatchProcessing::FinalizeTimeStep)
       .def("run_search", &PyBatchProcessing::RunSearch,
            "ignore_last_exit_cost"_a = true)
+      .def("compute_trajectories", &PyBatchProcessing::ComputeTrajectories,
+           "ignore_last_exit_cost"_a)
+      .def("remove_inactive_tracks", &PyBatchProcessing::RemoveInactiveTracks)
       .def_property_readonly(
           "ST", [](const py::object&) { return mcf::BatchProcessing::ST; });
 
