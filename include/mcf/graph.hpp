@@ -86,7 +86,7 @@ class Graph {
  public:
   // Public interface, used to modify the graph.
 
-  static const int ST = 0;  //!< One common id for source and sink.
+  static const int ST;  //!< One common id for source and sink.
 
   //! Empty constructor.
   Graph();

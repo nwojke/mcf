@@ -1,13 +1,12 @@
 // vim: expandtab:ts=2:sw=2
 #include <mcf/batch_processing.hpp>
+#include <mcf/internal/k_shortest_path.hpp>
+#include <mcf/internal/util.hpp>
 
 #include <algorithm>
 #include <cassert>
 #include <sstream>
 #include <stdexcept>
-
-#include <mcf/internal/k_shortest_path.hpp>
-#include <mcf/internal/util.hpp>
 
 namespace mcf {
 
@@ -82,286 +81,169 @@ void Solve(ShortestPathSolverType solver_type, const Graph& graph,
 }
 
 /**
- * Check if two trajectories overlap and find the matching location.
+ * Check if new_trajectory extends cached_trajectory.
  *
- * Locations in new_trajectory with index in [new_begin, new_end) hould be
- * added to the cached trajectory, such that the trajectory extends into the
- * new optimization window. This function computes new_begin and new_end for
- * this purpose.
- *
- * @param cached_trajectory A cached trajectory from previous solver runs.
+ * @param location_to_timestep A functor that maps from location to time step.
+ * @param first_optimized_timestep The first time step in the current
+ *        optimization window.
+ * @param cached_trajectory A cached trajectory from the previous solver run.
  * @param new_trajectory A new trajectory found at the current solver run.
- * @param location_to_timestep A mapping from location to time step.
- * @param clipping_timestep The first time step in the new optimization window.
- *        The new trajectory head is the first node in new_trajectory with
- *        time step larger or equal to this value.
- * @param new_begin On success, points one element behind the matched location
- *        in new_trajectory.
- *        Takes on new_trajectory.size() if the trajectory is fully contained
- *        in the new optimization window.
- * @param new_end On success, points one element behind the new head in
- *        new_trajectory, i.e., the first element with time step larger or
- *        equal to clipping_timestep.
- *        Takes on new_trajectory.size() if the trajectory does not extend into
- *        the new optimization window.
- * @return True if cached_trajectory and new_trajectory share a common
- *        location.
+ * @param matched_cached_index Set to the index of the matched location on
+ *        cached_trajectory.
+ * @param new_trajectory Set to the index of the matched location on
+ *        new_trajectory.
+ * @return True if new_trajectory starts on cached_trajectory.
  */
-bool ExtendTrajectory(const std::vector<int>& cached_trajectory,
-                      const std::vector<int>& new_trajectory,
-                      const std::vector<int>& location_to_timestep,
-                      const int clipping_timestep, std::size_t& new_begin,
-                      std::size_t& new_end) {
-  if (cached_trajectory.empty()) {
+template <typename LocationToTimestep>
+bool FindMatchingLocation(
+    LocationToTimestep location_to_timestep,
+    const BatchProcessing::Index& first_optimized_timestep,
+    const std::vector<BatchProcessing::Index>& cached_trajectory,
+    const std::vector<BatchProcessing::Index>& new_trajectory,
+    int& matched_cached_index, int& matched_new_index) {
+  if (cached_trajectory.empty() || new_trajectory.empty()) {
     // Empty trajectory has nothing to match against.
     return false;
   }
 
-  const int previous_head = cached_trajectory.back();
-  const int previous_head_timestep = location_to_timestep[previous_head];
+  // A valid match is only found if the new_trajectory starts on
+  // cached_trajectory.
+  const BatchProcessing::Index matched_location = new_trajectory.front();
 
-  // Search for a matching location on the trajectory.
-  std::size_t matched_location_index = 0;
-  for (; matched_location_index < new_trajectory.size();
-       ++matched_location_index) {
-    const int location = new_trajectory[matched_location_index];
-    if (location_to_timestep[location] > previous_head_timestep) {
-      // No need to iterate further, remaining locations are beyond the
-      // previous trajectory head in time.
-      return false;
-    }
-
-    if (location == previous_head) {
-      // Match found.
+  // Find the first location in cached_trajectory within the current
+  // optimization window.
+  int matched_index = -1;
+  for (int i = static_cast<int>(cached_trajectory.size()) - 1; i >= 0; --i) {
+    if (location_to_timestep(cached_trajectory[i]) < first_optimized_timestep) {
+      // We have moved beyond the optimization window.
       break;
     }
+    matched_index = static_cast<int>(i);
+  }
+  if (matched_index < 0) {
+    // Trajectory does not extend into the current optimization window.
+    return false;
   }
 
-  // Search for new trajectory head in the next optimization window.
-  std::size_t new_head_index = matched_location_index;
-  for (; new_head_index < new_trajectory.size(); ++new_head_index) {
-    const int location = new_trajectory[new_head_index];
-    if (location_to_timestep[location] >= clipping_timestep) {
-      // We found a location in the new optimization window.
-      break;
-    }
+  // Establish a match if the first location inside the current optimization
+  // window equals new_trajectory.front().
+  const bool locations_match =
+      cached_trajectory[matched_index] == matched_location;
+  if (locations_match) {
+    matched_cached_index = matched_index;
+    matched_new_index = 0;
   }
+  return locations_match;
+}
 
-  // new_begin should point one behind the matched location, new_end should
-  // point one behind the new trajectory head.
-  new_begin = matched_location_index + 1;  // <= new_trajectory.size()
-  new_end = std::min(new_head_index + 1, new_trajectory.size());
-
-  // If matching_location points to the last element in new_trajectory, then
-  // new_begin points to new_trajectory.end() and we return true with
-  // new_begin == new_end == new_trajectory.size().
-  return new_begin <= new_trajectory.size();
+/**
+ * Extend cached trajectory with a matched new_trajectory.
+ *
+ *param matched_new_index Index of the matching location in new_trajectory.
+ * @param new_trajectory A new trajectory found at the current solver run.
+ * @param matched_cached_index Index of the matching location in
+ *        cached_trajectory.
+ * @param cached_trajectory A cached trajectory from previous solver runs; will
+ *        be extended with new_trajectory[matched_new_index:], i.e.,
+ *        cached_trajectory' = cached_trajectory[:matched_cached_index] +
+ *        new_trajectory[matched_new_index:].
+ */
+void ExtendTrajectory(int matched_new_index,
+                      const std::vector<BatchProcessing::Index>& new_trajectory,
+                      int matched_cached_index,
+                      BatchProcessing::Trajectory& cached_trajectory) {
+  assert(matched_cached_index >= 0 && matched_new_index >= 0);
+  cached_trajectory.reserve(matched_cached_index + new_trajectory.size() -
+                            matched_new_index);
+  cached_trajectory.resize(matched_cached_index);
+  cached_trajectory.insert(cached_trajectory.end(),
+                           new_trajectory.begin() + matched_new_index,
+                           new_trajectory.end());
 }
 
 /**
  * Merge cached trajectories and newly computed trajectories.
  *
- * @param location_to_timestep A mapping from location to time step.
- * @param clipping_timestep The first time step in the new optimization window.
- *        Cached trajectories should be extended, such that the new head has a
- *        time step larger or equal to this value.
+ * @param location_to_timestep A functor that maps from location to time step.
+ * @param first_optimized_timestep The first time step in the current
+ *        optimization window.
  * @param new_trajectories The new trajectories, computed at the most recent
  *        time step.
  * @param cached_trajectories The cached trajectories, computed in previous
- *        time steps. Will be extended to clipping_timestep using nodes from
- *        matching trajectories in new_trajectories.
- * @param cached_labels Unique trajectory labels associated with cached
- *        trajectories.
- * @param full_trajectories Contains all trajectories that have been found up
- *        until the most recent time step in their full length.
- * @param full_labels Unique trajectory labels associated with
- *        full_trajectories.
- * @param clipping_indices Contains the index of the new trajectory head in
- *        new_trajectories or -1 if the trajectory is not part of the cache.
- * @param label_to_noncached_trajectory_head Maps from trajectory index to
- *        trajectory head; used to keep non-cached trajectories, i.e.,
- *        trajectories that are fully contained in the optimization window,
- *        consistently labeled throughout subsequent solver runs.
- * @param next_label A counter used to create unique trajectory labels.
+ *        time steps. The cached_trajectories are extended by matches in
+ *        new_trajectories.
+ * @param active Set to true if the trajectory is part of the current
+ *        solution and false otherwise.
+ * @param next_trajectory_index A counter used to create unique trajectory
+ *        indices.
  */
-void MergeTrajectories(const std::vector<int> location_to_timestep,
-                       const int clipping_timestep,
-                       const std::vector<std::vector<int>>& new_trajectories,
-                       std::vector<std::vector<int>>& cached_trajectories,
-                       std::vector<int>& cached_labels,
-                       std::vector<std::vector<int>>& full_trajectories,
-                       std::vector<int>& full_labels,
-                       std::vector<int>& clipping_indices,
-                       std::map<int, int>& label_to_noncached_trajectory_head,
-                       int& next_label) {
-  assert(cached_trajectories.size() == cached_labels.size());
-  // TODO(nwojke): Refactor to shorter functions.
+template <typename LocationToTimestep>
+void MergeTrajectories(
+    LocationToTimestep location_to_timestep,
+    const BatchProcessing::Index& first_optimized_timestep,
+    const BatchProcessing::Index& clipping_timestep,
+    const std::vector<std::vector<BatchProcessing::Index>>& new_trajectories,
+    BatchProcessing::TrajectoryMap& cached_trajectories,
+    std::unordered_map<BatchProcessing::Index, bool>& active,
+    BatchProcessing::Index& next_trajectory_index) {
+  // First, try to match existing trajectories.
+  std::vector<bool> new_trajectory_matched(new_trajectories.size(), false);
 
-  // Reserve some space and initialize clipping locations to default value.
-  cached_trajectories.reserve(cached_trajectories.size() +
-                              new_trajectories.size());
-  full_trajectories.reserve(cached_trajectories.size() +
-                            new_trajectories.size());
+  active.clear();
 
-  clipping_indices.resize(new_trajectories.size());
-  std::fill_n(clipping_indices.begin(), new_trajectories.size(), -1);
-
-  // First, try to extend cached trajectories.
-  for (std::size_t cache_index = 0; cache_index < cached_trajectories.size();
-       ++cache_index) {
-    std::vector<int>& cached_trajectory = cached_trajectories[cache_index];
-    const int cached_label = cached_labels[cache_index];
-
-    std::size_t new_begin = std::numeric_limits<std::size_t>::max();
-    std::size_t new_end = std::numeric_limits<std::size_t>::max();
-    std::size_t trajectory_index = 0;
-    for (; trajectory_index < new_trajectories.size(); ++trajectory_index) {
-      if (clipping_indices[trajectory_index] >= 0) {
-        // This trajectory has been previously matched, ignore.
+  for (auto it = cached_trajectories.begin(); it != cached_trajectories.end();
+       ++it) {
+    int matched_cached_index = -1;
+    for (std::size_t k = 0; k < new_trajectories.size(); ++k) {
+      int matched_new_index = -1;
+      if (new_trajectory_matched[k] ||
+          !FindMatchingLocation(location_to_timestep, first_optimized_timestep,
+                                it->second, new_trajectories[k],
+                                matched_cached_index, matched_new_index)) {
+        // If a trajectory has been matched in an earlier iteration, assert
+        // that we are not skipping on a potential assignment.
+        assert(!FindMatchingLocation(
+            location_to_timestep, first_optimized_timestep, it->second,
+            new_trajectories[k], matched_cached_index, matched_new_index));
         continue;
       }
-      if (ExtendTrajectory(
-              cached_trajectory, new_trajectories[trajectory_index],
-              location_to_timestep, clipping_timestep, new_begin, new_end)) {
-        // Found a matching trajectory.
-        break;
-      }
+
+      ExtendTrajectory(matched_new_index, new_trajectories[k],
+                       matched_cached_index, it->second);
+      new_trajectory_matched[k] = true;
     }
 
-    // Copy trajectory over to full_trajectories. If a match was found, extend
-    // cached trajectory to new end and extend the full trajectory.
-    full_trajectories.push_back(cached_trajectory);
-    full_labels.push_back(cached_label);
-    if (trajectory_index >= new_trajectories.size()) {
-      // No match.
-      continue;
-    }
-
-    // Here,
-    // * new_begin points one element behind the matched location (it is
-    //   the beginning of the newly seen part of the trajectory).
-    // * new_end points one element behind the new trajectory head (it is the
-    //   end of the newly seen part of the trajectory). If new_end points to
-    //   the end of the matched trajectory, it does not extend into the new
-    //   optimization window.
-    const std::vector<int>& matched_trajectory =
-        new_trajectories[trajectory_index];
-    const int num_new_in_cache = new_end - new_begin;
-    assert(num_new_in_cache >= 0 && "Invalid new trajectory segment.");
-
-    cached_trajectory.reserve(cached_trajectory.size() + num_new_in_cache);
-    cached_trajectory.insert(cached_trajectory.end(),
-                             matched_trajectory.begin() + new_begin,
-                             matched_trajectory.begin() + new_end);
-
-    const int num_new_in_full = matched_trajectory.size() - new_begin;
-    assert(num_new_in_full >= 0 && "Invalid new trajectory segment.");
-
-    full_trajectories.back().reserve(matched_trajectory.size() +
-                                     num_new_in_full);
-    full_trajectories.back().insert(full_trajectories.back().end(),
-                                    matched_trajectory.begin() + new_begin,
-                                    matched_trajectory.end());
-
-    // Store index of new trajectory head in clipping_indices.
-    clipping_indices[trajectory_index] = new_end - 1;
+    // Mark the trajectory active if (1) it has been matched against a
+    // new_trajectory or (2) it is entirely outside of the current optimization
+    // window.
+    active[it->first] =
+        matched_cached_index >= 0 ||
+        location_to_timestep(it->second.back()) < first_optimized_timestep;
   }
 
-  auto AddTrajectory =
-      [&new_trajectories, &location_to_timestep, &cached_trajectories,
-       &cached_labels, &full_trajectories, &full_labels, &clipping_indices,
-       &clipping_timestep](const int trajectory_index, const int label) {
-        // First, append the entire trajectory to full_trajectories.
-        const std::vector<int>& trajectory = new_trajectories[trajectory_index];
-        full_trajectories.push_back(trajectory);
-        full_labels.push_back(label);
-
-        // Now, find the clipping location and add partial trajectory to the
-        // cache.
-        std::size_t clipping_index = 0;
-        for (; clipping_index < trajectory.size(); ++clipping_index) {
-          if (location_to_timestep[trajectory[clipping_index]] >=
-              clipping_timestep) {
-            break;
-          }
-        }
-
-        if (clipping_index == 0) {
-          // The full trajectory is within the next optimization window, do not
-          // add it to cache.
-          return false;
-        }
-
-        if (clipping_index == trajectory.size()) {
-          // The trajectory does not extent into the next optimization window,
-          // do not add it to cache.
-          return false;
-        }
-
-        // Store clipping location.
-        clipping_indices[trajectory_index] = clipping_index;
-
-        const int end_index = std::min(clipping_index + 1, trajectory.size());
-        cached_trajectories.resize(cached_trajectories.size() + 1);
-        cached_trajectories.back().reserve(end_index);
-        cached_trajectories.back().insert(cached_trajectories.back().end(),
-                                          trajectory.begin(),
-                                          trajectory.begin() + end_index);
-        cached_labels.push_back(label);
-        return true;
-      };
-
-  // Now try adding previously seen, but non-cached trajectories with
-  // consistent label.
-  std::vector<bool> trajectory_is_new(clipping_indices.size());
-  for (std::size_t index = 0; index < clipping_indices.size(); ++index) {
-    trajectory_is_new[index] = clipping_indices[index] < 0;
-  }
-
-  for (auto index_and_head = label_to_noncached_trajectory_head.begin();
-       index_and_head != label_to_noncached_trajectory_head.end();) {
-    // Search for a matching trajectory that is not yet processed.
-    std::size_t trajectory_index = std::numeric_limits<std::size_t>::max();
-    for (std::size_t index = 0; index < new_trajectories.size(); ++index) {
-      assert(!new_trajectories[index].empty());
-      if (index_and_head->second == new_trajectories[index].front() &&
-          clipping_indices[index] < 0) {
-        trajectory_index = index;
-        break;
-      }
-    }
-
-    bool trajectory_is_cached = false;
-    if (trajectory_index < new_trajectories.size()) {
-      trajectory_is_cached =
-          AddTrajectory(trajectory_index, index_and_head->first);
-      trajectory_is_new[trajectory_index] = false;
-    }
-
-    if (trajectory_is_cached ||
-        location_to_timestep[index_and_head->second] < clipping_timestep) {
-      // A previously seen trajectory has been added to the cache or moved out
-      // of the optimization window. Remove it from the list of non-cached
-      // trajectories.
-      index_and_head = label_to_noncached_trajectory_head.erase(index_and_head);
+  // Remove any trajectory from the cache which is only partially inside the
+  // optimization window but is not currently detected. Simply setting
+  // active=false can lead to ambiguities in MergeTrajectories() in future time
+  // steps.
+  for (auto it = cached_trajectories.begin();
+       it != cached_trajectories.end();) {
+    if (!active[it->first] &&
+        location_to_timestep(it->second.front()) < clipping_timestep) {
+      active.erase(it->first);
+      it = cached_trajectories.erase(it);
     } else {
-      ++index_and_head;
+      ++it;
     }
   }
 
-  // Now, carry over remaining trajectories to cache and full_trajectories.
-  for (std::size_t trajectory_index = 0;
-       trajectory_index < new_trajectories.size(); ++trajectory_index) {
-    if (!trajectory_is_new[trajectory_index]) {
+  // Now, add all unmatched trajectories to the cache.
+  for (std::size_t i = 0; i < new_trajectories.size(); ++i) {
+    if (new_trajectory_matched[i]) {
       continue;
     }
-
-    const int label = next_label++;
-    if (!AddTrajectory(trajectory_index, label)) {
-      const int location = new_trajectories[trajectory_index].front();
-      label_to_noncached_trajectory_head.insert(
-          std::make_pair(label, location));
-    }
+    const BatchProcessing::Index index = next_trajectory_index++;
+    cached_trajectories[index] = new_trajectories[i];
+    active[index] = true;
   }
 }
 
@@ -443,12 +325,47 @@ void CollapseTrajectories(
 }
 
 /**
+ * Remove inactive trajectories from the cache when they leave the optimization
+ * window.
+ *
+ * @param location_to_timestep A functor that maps from location to time step.
+ * @param clipping_timestep The first time step in the new optimization window.
+ *        Inactive trajectories with starting time step smaller than this value
+ *        are removed from the cache.
+ * @param cached_trajectories A sparse trajectory cache that maps from index
+ *        to trajectory.
+ * @param active A map that indicates whether the corresponding entry in
+ *        cached_trajectories is part of the current solution or if it
+ *        corresponds to a cached, but inactive previous solution.
+ */
+template <typename LocationToTimestep>
+void CleanupTrajectoryCache(
+    LocationToTimestep location_to_timestep,
+    const BatchProcessing::Index& clipping_timestep,
+    BatchProcessing::TrajectoryMap& cached_trajectories,
+    std::unordered_map<BatchProcessing::Index, bool>& active) {
+  for (auto it = cached_trajectories.begin();
+       it != cached_trajectories.end();) {
+    assert(active.count(it->first) > 0);
+    assert(!it->second.empty());
+
+    if (active[it->first] ||
+        location_to_timestep(it->second.front()) < clipping_timestep) {
+      ++it;
+      continue;
+    }
+
+    it = cached_trajectories.erase(it);
+  }
+}
+
+/**
  * Pop first n non-source/sink nodes from the graph.
  *
  * @param n Number of nodes to remove.
  * @param graph The graph.
  */
-void PopFirstN(const int n, Graph& graph) {
+void PopFirstN(int n, Graph& graph) {
   std::vector<Edge>& edges = graph.mutable_edges();
   const int num_nodes = graph.num_nodes();
   assert(num_nodes >= Graph::FirstNonSourceSinkNode + n &&
@@ -490,38 +407,40 @@ void PopFirstN(const int n, Graph& graph) {
   graph.overwrite_num_nodes(num_nodes - n);
 }
 
-}  // unnamed namespace
+}  // namespace
 
-BatchProcessing::BatchProcessing(const int window_len,
+const BatchProcessing::Index BatchProcessing::ST =
+    static_cast<BatchProcessing::Index>(Graph::ST);
+
+BatchProcessing::BatchProcessing(int window_len,
                                  ShortestPathSolverType solver_type)
     : solver_type_(solver_type),
       window_len_(window_len),
       current_timestep_(0),
       previous_clipping_timestep_(0),
       num_pruned_locations_(0),
-      location_to_timestep_(1, -1),
-      timestep_to_locations_(1),
-      next_label_(0) {}
+      next_trajectory_index_(0) {
+  location_to_timestep_[BatchProcessing::ST] =
+      std::numeric_limits<Index>::max();
+  timestep_to_locations_.emplace(0, std::vector<Index>());
+}
 
 void BatchProcessing::Reserve(int num_edges) { graph_.Reserve(num_edges); }
 
-int BatchProcessing::Add(const double cost) {
+BatchProcessing::Index BatchProcessing::Add(double cost) {
   const int graph_index = graph_.Add(cost);
-  const int location = to_sequence_index(graph_index);
+  const Index location = to_sequence_index(graph_index);
 
-  location_to_timestep_.resize(location_to_timestep_.size() + 1);
-  assert(static_cast<int>(timestep_to_locations_.size()) ==
-         current_timestep_ + 1);
-  assert(static_cast<int>(location_to_timestep_.size()) == location + 1);
-
-  timestep_to_locations_[current_timestep_].push_back(location);
   location_to_timestep_[location] = current_timestep_;
+  timestep_to_locations_[current_timestep_].push_back(location);
   return location;
 }
 
-void BatchProcessing::Link(int src, int dst, double cost) {
-  if ((src != ST && src < num_pruned_locations_) ||
-      (dst != ST && dst < num_pruned_locations_)) {
+void BatchProcessing::Link(Index src, Index dst, double cost) {
+  if ((src != static_cast<Index>(ST) &&
+       static_cast<Index>(src) < num_pruned_locations_) ||
+      (dst != static_cast<Index>(ST) &&
+       static_cast<Index>(dst) < num_pruned_locations_)) {
     std::stringstream msg;
     msg << "Cannot link a pruned location. Source: " << src
         << " target: " << dst
@@ -529,97 +448,154 @@ void BatchProcessing::Link(int src, int dst, double cost) {
     throw std::invalid_argument(msg.str().c_str());
   }
 
-  src = to_graph_index(src);
-  dst = to_graph_index(dst);
-  assert(src >= 0 && src <= graph_.num_nodes());
-  assert(dst >= 0 && dst <= graph_.num_nodes());
-
-  graph_.Link(src, dst, cost);
+  const int graph_src = to_graph_index(src);
+  const int graph_dst = to_graph_index(dst);
+  assert(graph_src >= 0 && graph_src <= graph_.num_nodes());
+  assert(graph_dst >= 0 && graph_dst <= graph_.num_nodes());
+  graph_.Link(graph_src, graph_dst, cost);
 }
 
-void BatchProcessing::FinalizeTimeStep() {
-  timestep_to_locations_.resize(timestep_to_locations_.size() + 1);
-  ++current_timestep_;
+void BatchProcessing::FinalizeTimeStep() { ++current_timestep_; }
+
+void BatchProcessing::RunSearch(std::vector<Trajectory>& trajectories,
+                                bool ignore_last_exit_cost) {
+  Update(ignore_last_exit_cost);
+
+  trajectories.resize(next_trajectory_index_);
+  for (const auto& index_and_trajectory : trajectories_) {
+    assert(active_.count(index_and_trajectory.first) > 0);
+    if (!active_.find(index_and_trajectory.first)->second) {
+      continue;
+    }
+
+    Trajectory& trajectory = trajectories.at(index_and_trajectory.first);
+    trajectory.reserve(index_and_trajectory.second.size());
+    trajectory.insert(trajectory.end(), index_and_trajectory.second.begin(),
+                      index_and_trajectory.second.end());
+  }
 }
 
-void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
-                                const bool ignore_last_exit_cost) {
-  const int num_timesteps_in_graph =
+BatchProcessing::TrajectoryMap BatchProcessing::ComputeTrajectories(
+    bool ignore_last_exit_cost) {
+  Update(ignore_last_exit_cost);
+
+  TrajectoryMap trajectories;
+  for (auto it = trajectories_.begin(); it != trajectories_.end(); ++it) {
+    assert(active_.count(it->first) > 0);
+    if (!active_.find(it->first)->second) {
+      continue;
+    }
+    trajectories.emplace(it->first, it->second);
+  }
+
+  return trajectories;
+}
+
+void BatchProcessing::RemoveInactiveTracks() {
+  for (auto it = trajectories_.begin(); it != trajectories_.end();) {
+    assert(!it->second.empty());
+    if (location_to_timestep_[it->second.back()] <
+        previous_clipping_timestep_) {
+      it = trajectories_.erase(it);
+      continue;
+    }
+    ++it;
+  }
+}
+
+void BatchProcessing::Update(bool ignore_last_exit_cost) {
+  const Index num_timesteps_in_graph =
       current_timestep_ - previous_clipping_timestep_;
   print("Batch processor called at time step ", current_timestep_);
   print("Number of time steps in graph: ", num_timesteps_in_graph);
   if (num_timesteps_in_graph <= 0) {
     // No new data in the graph, no need to solve.
-    trajectories = trajectories_;
     return;
   }
 
-  // Run solver on full graph up to current_timestep_.
+  // Run solver.
   std::vector<std::vector<int>> node_index_to_incoming_edges;
   std::vector<std::vector<int>> node_index_to_outgoing_edges;
   internal::BuildEdgeMap(graph_, node_index_to_incoming_edges,
                          node_index_to_outgoing_edges);
 
-  std::vector<int> locations_in_last_timestep =
-      timestep_to_locations_[timestep_to_locations_.size() - 2];
-  for (int& location : locations_in_last_timestep) {
-    location = to_graph_index(location);
-  }
+  const auto& locations_in_last_timestep =
+      timestep_to_locations_[current_timestep_ - 1];  // the last finalized
+  std::vector<int> graph_locations_in_last_timestep(
+      locations_in_last_timestep.size());
+  std::transform(locations_in_last_timestep.begin(),
+                 locations_in_last_timestep.end(),
+                 graph_locations_in_last_timestep.begin(),
+                 [this](const Index& index) { return to_graph_index(index); });
 
   std::vector<std::vector<int>> new_trajectories_in_graph;
   std::vector<int> node_index_to_shortest_path_incoming_edge;
   Solve(solver_type_, graph_, node_index_to_incoming_edges,
-        node_index_to_outgoing_edges, locations_in_last_timestep,
+        node_index_to_outgoing_edges, graph_locations_in_last_timestep,
         new_trajectories_in_graph, node_index_to_shortest_path_incoming_edge,
         ignore_last_exit_cost);
   print("Found ", new_trajectories_in_graph.size(), " trajectories");
 
   // Convert locations in new trajectories to sequence indices and merge with
   // previously found trajectories. Also, copy into result.
-  std::vector<std::vector<int>> new_trajectories_in_sequence =
-      new_trajectories_in_graph;
-  for (std::vector<int>& trajectory : new_trajectories_in_sequence) {
-    for (int& location : trajectory) {
-      location = to_sequence_index(location);
-    }
+  std::vector<std::vector<Index>> new_trajectories(
+      new_trajectories_in_graph.size());
+  for (std::size_t i = 0; i < new_trajectories.size(); ++i) {
+    new_trajectories[i].resize(new_trajectories_in_graph[i].size());
+    std::transform(new_trajectories_in_graph[i].begin(),
+                   new_trajectories_in_graph[i].end(),
+                   new_trajectories[i].begin(),
+                   [this](int index) { return to_sequence_index(index); });
   }
 
   // The clipping time step is the first time step in the next optimization
-  // window. It is also the time step at which we want to place the new
-  // cached trajectory head. Everything until clipping_timestep - 1 will be
-  // forgotten.
+  // window.
   // NOTE(nwojke): +1, because we optimize to the last finalized time step,
   // which is current_timestep_ - 1.
-  const int clipping_timestep =
-      std::max(0, current_timestep_ - window_len_ + 1);
-  std::vector<int> clipping_indices;
-  std::vector<std::vector<int>> full_trajectories;
-  std::vector<int> full_labels;
-  MergeTrajectories(
-      location_to_timestep_, clipping_timestep, new_trajectories_in_sequence,
-      trajectories_, trajectory_labels_, full_trajectories, full_labels,
-      clipping_indices, label_to_noncached_trajectory_head_, next_label_);
+  const Index clipping_timestep =
+      static_cast<Index>(std::max(0l, static_cast<long>(current_timestep_) -
+                                          static_cast<long>(window_len_) + 1));
 
-  trajectories.resize(next_label_);
-  for (std::size_t i = 0; i < full_trajectories.size(); ++i) {
-    assert(trajectories[full_labels[i]].empty());
-    trajectories[full_labels[i]] = full_trajectories[i];
-  }
+  auto location_to_timestep = [this](const Index& index) -> Index {
+    // NOTE(nwojke): Mapping everything unknown to 0 is a bit unsafe, but
+    // this way we can remove locations outside the optimization window from
+    // the map.
+    auto it = location_to_timestep_.find(index);
+    return it != location_to_timestep_.end() ? it->second : 0;
+  };
 
-  print("Total number of trajectories over the entire sequence: ",
-        trajectories.size());
+  MergeTrajectories(location_to_timestep, previous_clipping_timestep_,
+                    clipping_timestep, new_trajectories, trajectories_, active_,
+                    next_trajectory_index_);
+  print("Number of trajectories in cache: ", trajectories_.size());
 
   // Collapse trajectories into the new trajectory head (index to new head is
   // stored in clipping_indices).
+  std::vector<int> clipping_indices(new_trajectories.size());
+  for (std::size_t i = 0; i < new_trajectories.size(); ++i) {
+    for (int j = static_cast<int>(new_trajectories[i].size()) - 1; j >= 0;
+         --j) {
+      if (location_to_timestep(new_trajectories[i][j]) < clipping_timestep) {
+        break;
+      }
+      clipping_indices[i] = j;
+    }
+  }
   CollapseTrajectories(new_trajectories_in_graph, clipping_indices,
                        node_index_to_incoming_edges,
                        node_index_to_shortest_path_incoming_edge, graph_);
+  CleanupTrajectoryCache(location_to_timestep, clipping_timestep, trajectories_,
+                         active_);
 
   // Pop time steps outside the next optimization window from graph.
   int num_locations_to_prune = 0;
-  for (int timestep = previous_clipping_timestep_; timestep < clipping_timestep;
-       ++timestep) {
+  for (Index timestep = previous_clipping_timestep_;
+       timestep < clipping_timestep; ++timestep) {
     num_locations_to_prune += timestep_to_locations_[timestep].size();
+    for (const Index& location : timestep_to_locations_[timestep]) {
+      location_to_timestep_.erase(location);
+    }
+    timestep_to_locations_.erase(timestep);
   }
   print("Pruning ", num_locations_to_prune, " locations.");
   PopFirstN(2 * num_locations_to_prune, graph_);  // Each location has 2 nodes.
@@ -630,13 +606,16 @@ void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
   print("Number of locations in graph: ", (graph_.num_nodes() - 2) / 2);
 }
 
-inline int BatchProcessing::to_graph_index(const int sequence_index) const {
+inline int BatchProcessing::to_graph_index(Index sequence_index) const {
   return sequence_index == ST ? sequence_index
                               : sequence_index - num_pruned_locations_;
 }
 
-inline int BatchProcessing::to_sequence_index(const int graph_index) const {
-  return graph_index == ST ? graph_index : graph_index + num_pruned_locations_;
+inline BatchProcessing::Index BatchProcessing::to_sequence_index(
+    int graph_index) const {
+  return graph_index == static_cast<int>(ST)
+             ? static_cast<Index>(graph_index)
+             : static_cast<Index>(graph_index) + num_pruned_locations_;
 }
 
 }  // namespace mcf

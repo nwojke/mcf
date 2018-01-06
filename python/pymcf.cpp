@@ -163,7 +163,8 @@ class PySolver {
 // attribute storage.
 class PyBatchProcessing {
  public:
-  PyBatchProcessing(int window_len) : processor_(window_len) {}
+  PyBatchProcessing(int window_len)
+      : processor_(window_len), min_active_location_(0) {}
 
   void Reserve(const int num_edges) { processor_.Reserve(num_edges); }
 
@@ -180,10 +181,45 @@ class PyBatchProcessing {
 
   void FinalizeTimeStep() { processor_.FinalizeTimeStep(); }
 
-  std::vector<std::vector<int>> RunSearch(const bool ignore_last_exit_cost) {
-    std::vector<std::vector<int>> trajectories;
+  std::vector<mcf::BatchProcessing::Trajectory> RunSearch(
+      bool ignore_last_exit_cost) {
+    std::vector<mcf::BatchProcessing::Trajectory> trajectories;
     processor_.RunSearch(trajectories, ignore_last_exit_cost);
+    for (const auto& trajectory : trajectories) {
+      if (trajectory.empty()) {
+        continue;
+      }
+      min_active_location_ = std::min(min_active_location_, trajectory.front());
+    }
     return trajectories;
+  }
+
+  mcf::BatchProcessing::TrajectoryMap ComputeTrajectories(
+      bool ignore_last_exit_cost) {
+    mcf::BatchProcessing::TrajectoryMap trajectories =
+        processor_.ComputeTrajectories(ignore_last_exit_cost);
+    for (const auto& index_and_trajectory : trajectories) {
+      assert(!index_and_trajectory.second.empty());
+      min_active_location_ =
+          std::min(min_active_location_, index_and_trajectory.second.front());
+    }
+    return trajectories;
+  }
+
+  void RemoveInactiveTracks() {
+    // Remove unusued tracks.
+    processor_.RemoveInactiveTracks();
+
+    // Remove unused attributes.
+    AttributeMap new_attribute_map;
+    for (const auto& location_and_attributes : location_attributes_) {
+      if (location_and_attributes.first >= min_active_location_) {
+        continue;
+      }
+      new_attribute_map.insert(location_and_attributes);
+    }
+
+    location_attributes_ = std::move(new_attribute_map);
   }
 
   //! Get location specific attributes.
@@ -192,8 +228,14 @@ class PyBatchProcessing {
   }
 
  private:
+  using AttributeMap =
+      std::unordered_map<mcf::BatchProcessing::Index, py::dict>;
+
   mcf::BatchProcessing processor_;
-  std::unordered_map<int, py::dict> location_attributes_;
+  AttributeMap location_attributes_;
+
+  // Location with smallest index on an active trajectory.
+  mcf::BatchProcessing::Index min_active_location_;
 };
 
 PYBIND11_PLUGIN(mcf) {
@@ -243,6 +285,9 @@ PYBIND11_PLUGIN(mcf) {
       .def("finalize_timestep", &PyBatchProcessing::FinalizeTimeStep)
       .def("run_search", &PyBatchProcessing::RunSearch,
            "ignore_last_exit_cost"_a = true)
+      .def("compute_trajectories", &PyBatchProcessing::ComputeTrajectories,
+           "ignore_last_exit_cost"_a)
+      .def("remove_inactive_tracks", &PyBatchProcessing::RemoveInactiveTracks)
       .def_property_readonly(
           "ST", [](const py::object&) { return mcf::BatchProcessing::ST; });
 
