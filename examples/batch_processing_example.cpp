@@ -42,14 +42,14 @@ int main(int argc, char** argv) {
       continue;
     }
 
-    std::vector<std::vector<int>> trajectories;
+    std::vector<mcf::BatchProcessing::Trajectory> trajectories;
     batch_processing.RunSearch(trajectories);
 
     std::cout << "Time step " << timestep << std::endl;
     std::cout << "Number of trajectories: " << trajectories.size() << std::endl;
     for (std::size_t i = 0; i < trajectories.size(); ++i) {
       std::cout << "  Trajectory " << i << ":";
-      for (const int& location : trajectories[i]) {
+      for (const auto& location : trajectories[i]) {
         std::cout << " " << location;
       }
       std::cout << std::endl;

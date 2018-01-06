@@ -88,6 +88,10 @@ void Solve(ShortestPathSolverType solver_type, const Graph& graph,
  *        optimization window.
  * @param cached_trajectory A cached trajectory from the previous solver run.
  * @param new_trajectory A new trajectory found at the current solver run.
+ * @param matched_cached_index Set to the index of the matched location on
+ *        cached_trajectory.
+ * @param new_trajectory Set to the index of the matched location on
+ *        new_trajectory.
  * @return True if new_trajectory starts on cached_trajectory.
  */
 template <typename LocationToTimestep>
@@ -97,9 +101,6 @@ bool FindMatchingLocation(
     const std::vector<BatchProcessing::Index>& cached_trajectory,
     const std::vector<BatchProcessing::Index>& new_trajectory,
     int& matched_cached_index, int& matched_new_index) {
-  matched_cached_index = -1;
-  matched_new_index = -1;
-
   if (cached_trajectory.empty() || new_trajectory.empty()) {
     // Empty trajectory has nothing to match against.
     return false;
@@ -107,33 +108,38 @@ bool FindMatchingLocation(
 
   // A valid match is only found if the new_trajectory starts on
   // cached_trajectory.
-  matched_new_index = 0;
-  const BatchProcessing::Index matched_location =
-      new_trajectory[matched_new_index];
+  const BatchProcessing::Index matched_location = new_trajectory.front();
 
   // Find the first location in cached_trajectory within the current
   // optimization window.
+  int matched_index = -1;
   for (int i = static_cast<int>(cached_trajectory.size()) - 1; i >= 0; --i) {
     if (location_to_timestep(cached_trajectory[i]) < first_optimized_timestep) {
       // We have moved beyond the optimization window.
       break;
     }
-    matched_cached_index = static_cast<int>(i);
+    matched_index = static_cast<int>(i);
   }
-  if (matched_cached_index < 0) {
+  if (matched_index < 0) {
     // Trajectory does not extend into the current optimization window.
     return false;
   }
 
   // Establish a match if the first location inside the current optimization
   // window equals new_trajectory.front().
-  return cached_trajectory[matched_cached_index] == matched_location;
+  const bool locations_match =
+      cached_trajectory[matched_index] == matched_location;
+  if (locations_match) {
+    matched_cached_index = matched_index;
+    matched_new_index = 0;
+  }
+  return locations_match;
 }
 
 /**
  * Extend cached trajectory with a matched new_trajectory.
  *
- * @param matched_new_index Index of the matching location in new_trajectory.
+ *param matched_new_index Index of the matching location in new_trajectory.
  * @param new_trajectory A new trajectory found at the current solver run.
  * @param matched_cached_index Index of the matching location in
  *        cached_trajectory.
@@ -175,12 +181,14 @@ template <typename LocationToTimestep>
 void MergeTrajectories(
     LocationToTimestep location_to_timestep,
     const BatchProcessing::Index& first_optimized_timestep,
+    const BatchProcessing::Index& clipping_timestep,
     const std::vector<std::vector<BatchProcessing::Index>>& new_trajectories,
     BatchProcessing::TrajectoryMap& cached_trajectories,
     std::unordered_map<BatchProcessing::Index, bool>& active,
     BatchProcessing::Index& next_trajectory_index) {
   // First, try to match existing trajectories.
   std::vector<bool> new_trajectory_matched(new_trajectories.size(), false);
+
   active.clear();
 
   for (auto it = cached_trajectories.begin(); it != cached_trajectories.end();
@@ -206,11 +214,26 @@ void MergeTrajectories(
     }
 
     // Mark the trajectory active if (1) it has been matched against a
-    // new_trajectory or (2) it is entirely outside of the optimization
+    // new_trajectory or (2) it is entirely outside of the current optimization
     // window.
     active[it->first] =
         matched_cached_index >= 0 ||
         location_to_timestep(it->second.back()) < first_optimized_timestep;
+  }
+
+  // Remove any trajectory from the cache which is only partially inside the
+  // optimization window but is not currently detected. Simply setting
+  // active=false can lead to ambiguities in MergeTrajectories() in future time
+  // steps.
+  for (auto it = cached_trajectories.begin();
+       it != cached_trajectories.end();) {
+    if (!active[it->first] &&
+        location_to_timestep(it->second.front()) < clipping_timestep) {
+      active.erase(it->first);
+      it = cached_trajectories.erase(it);
+    } else {
+      ++it;
+    }
   }
 
   // Now, add all unmatched trajectories to the cache.
@@ -434,7 +457,7 @@ void BatchProcessing::Link(Index src, Index dst, double cost) {
 
 void BatchProcessing::FinalizeTimeStep() { ++current_timestep_; }
 
-void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
+void BatchProcessing::RunSearch(std::vector<Trajectory>& trajectories,
                                 bool ignore_last_exit_cost) {
   Update(ignore_last_exit_cost);
 
@@ -445,7 +468,7 @@ void BatchProcessing::RunSearch(std::vector<std::vector<int>>& trajectories,
       continue;
     }
 
-    std::vector<int>& trajectory = trajectories.at(index_and_trajectory.first);
+    Trajectory& trajectory = trajectories.at(index_and_trajectory.first);
     trajectory.reserve(index_and_trajectory.second.size());
     trajectory.insert(trajectory.end(), index_and_trajectory.second.begin(),
                       index_and_trajectory.second.end());
@@ -542,7 +565,7 @@ void BatchProcessing::Update(bool ignore_last_exit_cost) {
   };
 
   MergeTrajectories(location_to_timestep, previous_clipping_timestep_,
-                    new_trajectories, trajectories_, active_,
+                    clipping_timestep, new_trajectories, trajectories_, active_,
                     next_trajectory_index_);
   print("Number of trajectories in cache: ", trajectories_.size());
 

@@ -34,7 +34,7 @@ namespace mcf {
  * * As alternative, call ComputeTrajectories() and RemoveInactiveTracks() at
  *   each time step (after a call to FinalizeTimeStep()) to only keep track of
  *   objects that are within the optimization window_len. This prevents the
- *   number of frajectories in the cache from growing unbounded.
+ *   number of trajectories in the cache from growing unbounded.
  */
 class BatchProcessing {
  public:
@@ -99,7 +99,7 @@ class BatchProcessing {
    *        affects the current trajectory search, future calls to RunSearch()
    *        work on the original graph structure.
    */
-  void RunSearch(std::vector<std::vector<int>>& trajectories,
+  void RunSearch(std::vector<Trajectory>& trajectories,
                  bool ignore_last_exit_cost = true);
 
   /**
@@ -109,7 +109,7 @@ class BatchProcessing {
    *        last time step is set to 0 prior to calling the solver. This only
    *        affects the current trajectory search, future calls to RunSearch()
    *        work on the original graph structure.
-   * @return Maps from trajectory index/identifier to lis of location handles
+   * @return Maps from trajectory index/identifier to list of location handles
    *         returned by Add().
    */
   TrajectoryMap ComputeTrajectories(bool ignore_last_exit_cost = true);
