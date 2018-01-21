@@ -31,10 +31,10 @@ namespace {
 void Solve(ShortestPathSolverType solver_type, const Graph& graph,
            const std::vector<std::vector<int>>& node_index_to_incoming_edges,
            const std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-           const std::vector<int> locations_in_last_timestep,
+           const std::vector<int>& locations_in_last_timestep,
            std::vector<std::vector<int>>& trajectories,
            std::vector<int>& node_index_to_shortest_path_incoming_edge,
-           const bool ignore_last_exit_cost) {
+           bool ignore_last_exit_cost) {
   // Copy graph to residual graph structure to be modified by k shortest path
   // algorithm.
   Graph residual_graph = graph;

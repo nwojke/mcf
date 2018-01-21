@@ -23,7 +23,7 @@ void ShortestPathSolver::Build(const Graph& graph) {
 }
 
 double ShortestPathSolver::Run(
-    const int flow, std::vector<std::vector<int>>& trajectories) const {
+    int flow, std::vector<std::vector<int>>& trajectories) const {
   // Build residual graph.
   Graph residual_graph = graph_;
   std::vector<std::vector<int>> node_index_to_incoming_edges =

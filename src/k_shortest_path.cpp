@@ -27,8 +27,8 @@ template <typename ShortestPathSolverFunction>
 int RunSuccessiveShortestPathSearch(
     ShortestPathSolverFunction shortest_path_finder, Graph& residual_graph,
     std::vector<std::vector<int>>& node_index_to_incoming_edges,
-    std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-    const int max_flow, const bool stop_on_best) {
+    std::vector<std::vector<int>>& node_index_to_outgoing_edges, int max_flow,
+    bool stop_on_best) {
   print("Running K shortest path search, stop on best: ", stop_on_best,
         " max flow: ", max_flow);
   // If max_flow is 0, we have nothing to do.
@@ -495,8 +495,8 @@ double ComputeTrajectoriesFromResidualGraph(
 int RunSuccessiveShortestPathSearchDijkstraLazyDeletion(
     Graph& residual_graph,
     std::vector<std::vector<int>>& node_index_to_incoming_edges,
-    std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-    const int max_flow, const bool stop_on_best) {
+    std::vector<std::vector<int>>& node_index_to_outgoing_edges, int max_flow,
+    bool stop_on_best) {
   return RunSuccessiveShortestPathSearch(
       ShortestPathDijkstraLazyDeletion, residual_graph,
       node_index_to_incoming_edges, node_index_to_outgoing_edges, max_flow,
@@ -507,8 +507,8 @@ int RunSuccessiveShortestPathSearchDijkstraLazyDeletion(
 int RunSuccessiveShortestPathSearchDijkstraFibonacciHeap(
     Graph& residual_graph,
     std::vector<std::vector<int>>& node_index_to_incoming_edges,
-    std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-    const int max_flow, const bool stop_on_best) {
+    std::vector<std::vector<int>>& node_index_to_outgoing_edges, int max_flow,
+    bool stop_on_best) {
   return RunSuccessiveShortestPathSearch(
       ShortestPathDijkstraFibonacciHeap, residual_graph,
       node_index_to_incoming_edges, node_index_to_outgoing_edges, max_flow,

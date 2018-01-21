@@ -13,7 +13,7 @@ namespace {
 constexpr int MaxIntCost = 50000;
 
 //! Convert a floating-point cost value to an integer cost for use with LEMON.
-int to_integer_cost(const double x, const double max_abs_cost) {
+int to_integer_cost(double x, double max_abs_cost) {
   const int cost = static_cast<int>(std::round(MaxIntCost * x / max_abs_cost));
   return std::min(MaxIntCost, std::max(-MaxIntCost, cost));
 }
@@ -57,7 +57,7 @@ void LemonSolver::Build(const Graph& graph) {
   solver_->upperMap(*upper_map_);
 }
 
-double LemonSolver::Run(const int flow,
+double LemonSolver::Run(int flow,
                         std::vector<std::vector<int>>& trajectories) const {
   ASSERT_NOTNULL(solver_);  // Uninitialized
 
@@ -99,7 +99,7 @@ double LemonSolver::Run(const int flow,
 }
 
 double LemonSolver::RunSearch(
-    const int min_flow, const int max_flow,
+    int min_flow, int max_flow,
     std::vector<std::vector<int>>& trajectories) const {
   ASSERT_NOTNULL(solver_);  // Uninitialized
 
@@ -123,8 +123,7 @@ double LemonSolver::RunSearch(
   return cost;
 }
 
-void LemonSolver::Reset(const std::size_t num_nodes,
-                        const std::size_t num_arcs) {
+void LemonSolver::Reset(std::size_t num_nodes, std::size_t num_arcs) {
   graph_.reset(new LemonGraph());
   graph_->reserveNode(num_nodes);
   graph_->reserveArc(num_arcs);

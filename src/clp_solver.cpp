@@ -30,8 +30,8 @@ namespace {
 void BuildLinearProgram(
     const std::vector<Edge>& edges,
     const std::vector<std::vector<int>>& node_index_to_incoming_edges,
-    const std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-    const int flow, ClpSimplex& model) {
+    const std::vector<std::vector<int>>& node_index_to_outgoing_edges, int flow,
+    ClpSimplex& model) {
   assert(node_index_to_incoming_edges.size() ==
              node_index_to_outgoing_edges.size() &&
          "node_index_to_incoming_edges.size() != "
@@ -108,7 +108,7 @@ void BuildLinearProgram(
  *        BuildLinearProgram().
  * @return True if the optimal solution has been found, false otherwise.
  */
-bool SolveLinearProgram(const int flow, ClpSimplex& model) {
+bool SolveLinearProgram(int flow, ClpSimplex& model) {
   // Set flow and solve problem.
   model.setRowBounds(Graph::InternalSourceNode, flow, flow);
   model.setRowBounds(Graph::InternalSinkNode, flow, flow);
@@ -151,7 +151,7 @@ void ComputeSuccessorMap(
     const std::vector<Edge>& edges,
     const std::vector<std::vector<int>>& node_index_to_incoming_edges,
     const std::vector<std::vector<int>>& node_index_to_outgoing_edges,
-    const ClpSimplex& model, const int flow, std::vector<int>& trajectory_heads,
+    const ClpSimplex& model, int flow, std::vector<int>& trajectory_heads,
     std::vector<int>& node_index_to_successor) {
   node_index_to_successor.resize(model.numberColumns());
   std::fill(node_index_to_successor.begin(), node_index_to_successor.end(), -1);
@@ -216,7 +216,7 @@ void ClpSolver::Build(const Graph& graph) {
                      node_index_to_outgoing_edges_, kDefaultFlow, *model_);
 }
 
-double ClpSolver::Run(const int flow,
+double ClpSolver::Run(int flow,
                       std::vector<std::vector<int>>& trajectories) const {
   ASSERT_NOTNULL(model_);  // Uninitialized
 
@@ -237,7 +237,7 @@ double ClpSolver::Run(const int flow,
   return ComputeSolutionCost(*model_, edges_);
 }
 
-double ClpSolver::RunSearch(const int min_flow, const int max_flow,
+double ClpSolver::RunSearch(int min_flow, int max_flow,
                             std::vector<std::vector<int>>& trajectories) const {
   ASSERT_NOTNULL(model_);  // Uninitialized
 
