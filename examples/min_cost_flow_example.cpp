@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
   int n[4];
   n[0] = g.Add(-1.0);
   n[1] = g.Add(1.0);
-  n[2] = g.Add(1.0);
+  n[2] = g.Add(-1.0);
   n[3] = g.Add(-1.0);
 
   for (int i = 0; i < 4; ++i) {

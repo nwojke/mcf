@@ -60,6 +60,23 @@ class ShortestPathSolver : public Solver {
   double Run(int flow,
              std::vector<std::vector<int>>& trajectories) const override;
 
+  /**
+   * Implements the interface in Solver::RunSearch. Note that this solver
+   * ignores the parameter min_flow. Use one of the other available solvers
+   * if you need this functionality.
+   *
+   * @param min_flow This value is ignored.
+   * @param max_flow Upper flow bound.
+   * @param trajectories Computed trajectories, where each trajectory is a
+   *        sequence of location handles.
+   * @return An internal cost representation that can be used to compare the
+   *         quality of solutions obtained from the same graph (smaller is
+   *         better). Returns std::numeric_limits<double>::infinity() if the
+   *         solution is infeasible.
+   *
+   * @throws std::runtime_error If the solver is uninitialized (no graph was
+   *         set using Build()).
+   */
   double RunSearch(int min_flow, int max_flow,
                    std::vector<std::vector<int>>& trajectories) const override;
 
