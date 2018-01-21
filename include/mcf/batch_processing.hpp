@@ -109,20 +109,38 @@ class BatchProcessing {
    *        last time step is set to 0 prior to calling the solver. This only
    *        affects the current trajectory search, future calls to RunSearch()
    *        work on the original graph structure.
+   * @param removed_indices If not nullptr, filled with the list of trajectory
+   *        indices that have been removed from the cache because they are
+   *        not part of the final solution.
    * @return Maps from trajectory index/identifier to list of location handles
    *         returned by Add().
+   *
    */
-  TrajectoryMap ComputeTrajectories(bool ignore_last_exit_cost = true);
+  TrajectoryMap ComputeTrajectories(
+      bool ignore_last_exit_cost = true,
+      std::vector<Index>* removed_indices = nullptr);
 
   /**
    * Remove trajectories from the cache that are not contained in the
    * optimization window. This affects the list of trajectories returned
    * by ComputeTrajectories() as well as RunSearch().
+   *
+   * @return A list of trajectory indices that are part of the final solution,
+   *         but have been removed from the cache because they are outside of
+   *         the optimization window.
    */
-  void RemoveInactiveTracks();
+  std::vector<Index> RemoveInactiveTracks();
+
+  /**
+   * Returns the minimum active location handle. A location is active if it is
+   * inside the current optimization window or part of a cached trajectory.
+   * A location smaller than this value is guaranteed to not be part of a
+   * trajectory in future calls to ComputeTrajectories().
+   */
+  Index ComputeMinActiveLocation() const;
 
  private:
-  void Update(bool ignore_last_exit_cost);
+  void Update(bool ignore_last_exit_cost, std::vector<Index>& removed_indices);
 
   int to_graph_index(Index sequence_index) const;
 

@@ -176,6 +176,8 @@ void ExtendTrajectory(int matched_new_index,
  *        solution and false otherwise.
  * @param next_trajectory_index A counter used to create unique trajectory
  *        indices.
+ * @param removed_indices Will be filled with a list of trajectory indices that
+ *        have been removed from the cache.
  */
 template <typename LocationToTimestep>
 void MergeTrajectories(
@@ -185,11 +187,13 @@ void MergeTrajectories(
     const std::vector<std::vector<BatchProcessing::Index>>& new_trajectories,
     BatchProcessing::TrajectoryMap& cached_trajectories,
     std::unordered_map<BatchProcessing::Index, bool>& active,
-    BatchProcessing::Index& next_trajectory_index) {
+    BatchProcessing::Index& next_trajectory_index,
+    std::vector<BatchProcessing::Index>& removed_indices) {
   // First, try to match existing trajectories.
   std::vector<bool> new_trajectory_matched(new_trajectories.size(), false);
 
   active.clear();
+  removed_indices.clear();
 
   for (auto it = cached_trajectories.begin(); it != cached_trajectories.end();
        ++it) {
@@ -230,6 +234,7 @@ void MergeTrajectories(
     if (!active[it->first] &&
         location_to_timestep(it->second.front()) < clipping_timestep) {
       active.erase(it->first);
+      removed_indices.push_back(it->first);
       it = cached_trajectories.erase(it);
     } else {
       ++it;
@@ -459,7 +464,8 @@ void BatchProcessing::FinalizeTimeStep() { ++current_timestep_; }
 
 void BatchProcessing::RunSearch(std::vector<Trajectory>& trajectories,
                                 bool ignore_last_exit_cost) {
-  Update(ignore_last_exit_cost);
+  std::vector<Index> removed_indices;
+  Update(ignore_last_exit_cost, removed_indices);
 
   trajectories.resize(next_trajectory_index_);
   for (const auto& index_and_trajectory : trajectories_) {
@@ -476,8 +482,12 @@ void BatchProcessing::RunSearch(std::vector<Trajectory>& trajectories,
 }
 
 BatchProcessing::TrajectoryMap BatchProcessing::ComputeTrajectories(
-    bool ignore_last_exit_cost) {
-  Update(ignore_last_exit_cost);
+    bool ignore_last_exit_cost, std::vector<Index>* removed_indices) {
+  std::vector<Index> the_removed_indices;
+  Update(ignore_last_exit_cost, the_removed_indices);
+  if (removed_indices != nullptr) {
+    *removed_indices = std::move(the_removed_indices);
+  }
 
   TrajectoryMap trajectories;
   for (auto it = trajectories_.begin(); it != trajectories_.end(); ++it) {
@@ -491,19 +501,36 @@ BatchProcessing::TrajectoryMap BatchProcessing::ComputeTrajectories(
   return trajectories;
 }
 
-void BatchProcessing::RemoveInactiveTracks() {
+std::vector<BatchProcessing::Index> BatchProcessing::RemoveInactiveTracks() {
+  std::vector<Index> removed_indices;
+
   for (auto it = trajectories_.begin(); it != trajectories_.end();) {
     assert(!it->second.empty());
     if (location_to_timestep_[it->second.back()] <
         previous_clipping_timestep_) {
+      removed_indices.push_back(it->first);
       it = trajectories_.erase(it);
       continue;
     }
     ++it;
   }
+
+  return removed_indices;
 }
 
-void BatchProcessing::Update(bool ignore_last_exit_cost) {
+BatchProcessing::Index BatchProcessing::ComputeMinActiveLocation() const {
+  Index min_active_location = ST + num_pruned_locations_;
+
+  for (auto it = trajectories_.begin(); it != trajectories_.end(); ++it) {
+    assert(!it->second.empty());
+    min_active_location = std::min(min_active_location, it->second.front());
+  }
+
+  return min_active_location;
+}
+
+void BatchProcessing::Update(bool ignore_last_exit_cost,
+                             std::vector<Index>& removed_indices) {
   const Index num_timesteps_in_graph =
       current_timestep_ - previous_clipping_timestep_;
   print("Batch processor called at time step ", current_timestep_);
@@ -566,7 +593,7 @@ void BatchProcessing::Update(bool ignore_last_exit_cost) {
 
   MergeTrajectories(location_to_timestep, previous_clipping_timestep_,
                     clipping_timestep, new_trajectories, trajectories_, active_,
-                    next_trajectory_index_);
+                    next_trajectory_index_, removed_indices);
   print("Number of trajectories in cache: ", trajectories_.size());
 
   // Collapse trajectories into the new trajectory head (index to new head is
