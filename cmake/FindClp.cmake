@@ -3,7 +3,7 @@
 #
 # Once done this will define
 #   Clp_FOUND               - System has CLP
-#   Clp_INCLUDE_DIRS        - The lemon include directories
+#   Clp_INCLUDE_DIRS        - The Clp include directories
 #   Clp_LIBRARIES           - The libraries needed to use CLP
 #   Clp_DEFINITIONS         - Compiler switches required for CLP
 #
@@ -12,7 +12,7 @@
 # to define a custom installation prefix.
 find_package(PkgConfig)
 pkg_check_modules(PC_Clp QUIET clp)
-set(Lemon_DEFINITIONS ${PC_Clp_CFLAGS_OTHER})
+set(Cbc_DEFINITIONS ${PC_Clp_CFLAGS_OTHER})
 
 find_path(Clp_INCLUDE_DIR ClpSimplex.hpp HINTS
   ${Clp_PREFIX}/include/coin
