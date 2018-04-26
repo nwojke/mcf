@@ -12,7 +12,7 @@
 # to define a custom installation prefix.
 find_package(PkgConfig)
 pkg_check_modules(PC_Clp QUIET clp)
-set(Cbc_DEFINITIONS ${PC_Clp_CFLAGS_OTHER})
+set(Clp_DEFINITIONS ${PC_Clp_CFLAGS_OTHER})
 
 find_path(Clp_INCLUDE_DIR ClpSimplex.hpp HINTS
   ${Clp_PREFIX}/include/coin
